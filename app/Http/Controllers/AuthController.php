@@ -2,7 +2,6 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\Order;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
@@ -12,44 +11,40 @@ class AuthController extends Controller
 {
     public function register(Request $request)
     {
-
-       $validated = Validator::make($request -> all(),[
-         'name' =>'required|string|max:255',
-         'email' =>'required|string|email|max:255|unique:users, email',
-         'password' =>'required|string|confirmed|min:6',
-         'role'=>'integer',
-         'address'=>'string|max:255',
-         'phone'=>'integer'
-     ]);
+        $validated = Validator::make($request->all(), [
+            'name' =>'required|string|max:255',
+            'email' =>'required|string|email|max:255|unique:users,email',
+            'password' =>'required|string|confirmed|min:6',
+            // role should not be accepted from user input for security
+            'address'=>'string|max:255|nullable',
+            'phone'=>'string|nullable'
+        ]);
 
         if($validated->fails()){
-           return response()->json($validated->errors(), status: 403);
-       }
-
-        // role co 2 gia tri la 0, 1 va 2
-        // 0 ung voi khach hang va 1 ung voi nhan vien, 2 ung voi quan tri vien
-        // quan tri vien khong phai dang ky tai khoan bang cach thong thuong nhu khach hang va nhan vien
-        // khi tao tai khoan mac dinh role se la 0, rieng nhan vien se duoc sua quyen sau trong ql tai khoan
+            return response()->json($validated->errors(), 422);
+        }
 
         try {
             $user = User::create([
                 'name' => $request->name,
                 'email' =>  $request->email,
-                'password' =>Hash::make( $request->password),
-                'role'=> $request->input('role', 0)
+                'password' => Hash::make($request->password),
+                'role' => 0, // always customer by default
+                'address' => $request->has('address') ? $request->address : '',
+                'phone' => $request->has('phone') ? $request->phone : '',
             ]);
 
             $token = $user->createToken('auth_token')->plainTextToken;
 
             return response()->json([
                 'access_token' => $token,
-                'user' => $user,
-                'message' =>'Register account successfully',
-            ], status: 200);
+                'user' => $user, // ideally wrap this in a Resource
+                'message' => 'Register account successfully',
+            ], 200);
         } catch (\Exception $exception){
             return response()->json([
-               'error'=>$exception->getMessage()
-            ], status: 403);
+                'error' => $exception->getMessage()
+            ], 500);
         }
     }
 
@@ -61,49 +56,41 @@ class AuthController extends Controller
         ]);
 
         if ($validated->fails()) {
-            return response()->json($validated->errors(), status: 403);
+            return response()->json($validated->errors(), 422);
         }
 
-        $credentials = [
-            'email' => $request->email,
-            'password' => $request->password,
-        ];
+        $credentials = $request->only('email', 'password');
 
         try {
             if (!auth()->attempt($credentials)) {
                 return response()->json([
                     'error' => 'Invalid credentials'
-                ], status: 403);
+                ], 401);
             }
 
             $user = User::where('email', $request->email)->firstOrFail();
-            $tokenResult = $user->createToken('auth_token');
-            $token = $tokenResult->plainTextToken;
-
-
-//            $tokenResult->accessToken->expires_at = now()->addHours(8);
-//            $tokenResult->accessToken->save();
+            $token = $user->createToken('auth_token')->plainTextToken;
 
             return response()->json([
                 'access_token' => $token,
-                'user' => $user,
+                'user' => $user, // ideally wrap this in a Resource
                 'message' => 'Login successfully',
-            ], status: 200);
+            ], 200);
         } catch (\Exception $th) {
             return response()->json([
                 'error' => $th->getMessage()
-            ], status: 403);
+            ], 500);
         }
     }
 
-    public function logout(Request $request){
-
-            $request->user()->currentAccessToken()->delete();
-            return response()->json([
-                'message' => 'Logout successfully'
-            ], 200);
-
+    public function logout(Request $request)
+    {
+        $token = $request->user()->currentAccessToken();
+        if ($token) {
+            $token->delete();
+        }
+        return response()->json([
+            'message' => 'Logout successfully'
+        ], 200);
     }
-
-
 }
